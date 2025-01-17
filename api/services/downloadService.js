@@ -1,9 +1,6 @@
 var { Readability } = require('@mozilla/readability')
 var { JSDOM } = require('jsdom')
-const { getCaptions } = require('@dofy/youtube-caption-fox');
-// const { getSubtitles } = require('youtube-caption-extractor')
-// const { google } = require('googleapis');
-// const youtube = google.youtube('v3');
+const { getSubtitles } = require('youtube-caption-extractor')
 
 const downloadService = {
   downloadWebPageText: async (url) => {
@@ -28,20 +25,27 @@ const downloadService = {
   downloadYouTubeCaptions: async (url) => {
     try {
       const videoId = extractVideoId(url)
-      const videoInfo = await getCaptions(videoId);
 
-      let formattedCaptions = '';
-      videoInfo.captions.forEach((caption) => {
-        const formattedTime = formatTime(caption.start);
-        formattedCaptions += `Timestamp: ${formattedTime}, Caption: ${caption.text}\n\n`;
-      });
+      const videoCaptions = await getSubtitles({
+        videoID: videoId,
+        lang: 'en'
+      })
+
+      let formattedCaptions = ''
+
+      videoCaptions.forEach((caption) => {
+        // round the seconds to the nearest second
+        caption.start = Math.round(caption.start)
+
+        const formattedTime = formatTime(caption.start)
+        formattedCaptions += `Timestamp: ${formattedTime}, Caption: ${caption.text}\n\n`
+      })
 
       return {
         status: 200,
-        body: JSON.stringify(videoInfo)
+        body: { type: 'captions', content: formattedCaptions }
       }
     } catch (error) {
-      console.error('Error fetching YouTube captions:', error);
       return { status: 500, body: error.message }
     }
   },
@@ -50,16 +54,15 @@ const downloadService = {
     try {
       const response = await fetch(url)
       const html = await response.text()
-      const dom = new JSDOM(html);
+      const dom = new JSDOM(html)
 
-      const releaseName = getGitHubReleaseTitle(dom);
-      const relatedIssuesUrl = getRelatedGitHubIssuesUrls(dom);
-      const relatedIssues = await getRelatedGitHubIssues(relatedIssuesUrl);
-      const gitHubReleaseHtml = buildGitHubReleaseHtml(releaseName, relatedIssues);
+      const releaseName = getGitHubReleaseTitle(dom)
+      const relatedIssuesUrl = getRelatedGitHubIssuesUrls(dom)
+      const relatedIssues = await getRelatedGitHubIssues(relatedIssuesUrl)
+      const gitHubReleaseHtml = buildGitHubReleaseHtml(releaseName, relatedIssues)
 
       return { status: 200, body: { type: 'webpage', content: gitHubReleaseHtml } }
-    }
-    catch (error) {
+    } catch (error) {
       return { status: 500, body: error.message }
     }
   }
@@ -80,35 +83,41 @@ function formatTime(seconds) {
 }
 
 function getGitHubReleaseTitle(dom) {
-  return dom.window.document.querySelector('#repo-content-turbo-frame h1').textContent;
+  return dom.window.document.querySelector('#repo-content-turbo-frame h1').textContent
 }
 
 function getRelatedGitHubIssuesUrls(dom) {
-  const releaseBodyElement = dom.window.document.querySelector('#repo-content-turbo-frame [data-test-selector="body-content"]');
-  const links = releaseBodyElement.querySelectorAll('a.issue-link');
-  const linkedIssuesUrls = [];
-  links.forEach(link => {
-    const href = link.getAttribute('href');
+  const releaseBodyElement = dom.window.document.querySelector(
+    '#repo-content-turbo-frame [data-test-selector="body-content"]'
+  )
+  const links = releaseBodyElement.querySelectorAll('a.issue-link')
+  const linkedIssuesUrls = []
+  links.forEach((link) => {
+    const href = link.getAttribute('href')
     if (href.indexOf('/issues/') > -1) {
-      linkedIssuesUrls.push(href);
+      linkedIssuesUrls.push(href)
     }
-  });
-  return linkedIssuesUrls;
+  })
+  return linkedIssuesUrls
 }
 
 async function getRelatedGitHubIssues(issuesUrls) {
-  const issues = await Promise.all(issuesUrls.map(async url => {
-    const response = await fetch(url)
-    const html = await response.text()
-    const dom = new JSDOM(html);
-    const title = dom.window.document.querySelector('#partial-discussion-header .js-issue-title').textContent;
-    const body = dom.window.document.querySelector('.js-comment-body').textContent;
-    return {
-      title,
-      body
-    };
-  }));
-  return issues;
+  const issues = await Promise.all(
+    issuesUrls.map(async (url) => {
+      const response = await fetch(url)
+      const html = await response.text()
+      const dom = new JSDOM(html)
+      const title = dom.window.document.querySelector(
+        '#partial-discussion-header .js-issue-title'
+      ).textContent
+      const body = dom.window.document.querySelector('.js-comment-body').textContent
+      return {
+        title,
+        body
+      }
+    })
+  )
+  return issues
 }
 
 function buildGitHubReleaseHtml(releaseName, issues) {
@@ -120,36 +129,16 @@ function buildGitHubReleaseHtml(releaseName, issues) {
 <body>
 <h1>${releaseName}</h1>
 
-${issues.map(issue => `
+${issues.map(
+  (issue) => `
 <h2>${issue.title}</h2>
 <p>${issue.body}</p>
-`)}
+`
+)}
 </body>
 </html>
-  `;
-  return html;
+  `
+  return html
 }
-
-// async function getYouTubeComments(videoId) {
-//   try {
-//     const response = await youtube.commentThreads.list({
-//       part: 'snippet',
-//       videoId: videoId,
-//       maxResults: 100,
-//       key: process.env.YOUTUBE_API_KEY
-//     });
-
-//     return response.data.items.map(item => {
-//       const comment = item.snippet.topLevelComment.snippet;
-//       return {
-//         author: comment.authorDisplayName,
-//         text: comment.textDisplay,
-//         publishedAt: comment.publishedAt
-//       };
-//     });
-//   } catch (error) {
-//     throw new Error('Failed to fetch YouTube comments');
-//   }
-// }
 
 module.exports = downloadService
